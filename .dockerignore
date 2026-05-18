@@ -1,0 +1,15 @@
+.git
+.github
+.gitignore
+.dockerignore
+.env
+auth.json
+Dockerfile
+README.md
+tests/
+phpunit.xml
+
+# Exclude local build artifacts if they exist
+node_modules/
+vendor/
+storage/logs/*
