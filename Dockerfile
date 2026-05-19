@@ -32,6 +32,8 @@ RUN apk add --no-cache \
         oniguruma-dev \
         icu-dev \
         sqlite \
+        sqlite-dev \
+        pkgconf \
     && docker-php-ext-install \
         pdo_sqlite \
         mbstring \
