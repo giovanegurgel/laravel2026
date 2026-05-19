@@ -18,7 +18,7 @@ RUN composer install \
     --optimize-autoloader
 
 # Build Vite assets in the same builder stage
-RUN npm ci && npm run build
+RUN npm install && npm run build
 
 # ─── Stage 2: Production image (PHP-FPM + Nginx via Supervisord) ───────────
 FROM php:8.3-fpm-alpine
