@@ -3,21 +3,16 @@ FROM composer:2.7 AS builder
 
 WORKDIR /app
 
-# System dependencies needed for frontend build tools
 RUN apk add --no-cache nodejs npm
 
-# Create a fresh Laravel project
 RUN composer create-project laravel/laravel . --prefer-dist --no-interaction
 
-# Install production PHP dependencies
 RUN composer install \
     --no-dev \
     --no-interaction \
-    --no-scripts \
     --prefer-dist \
     --optimize-autoloader
 
-# Build Vite assets in the same builder stage
 RUN npm install && npm run build
 
 # ─── Stage 2: Production image (PHP-FPM + Nginx via Supervisord) ───────────
@@ -53,8 +48,8 @@ COPY --chown=www-data:www-data --from=builder /app .
 ENV DB_CONNECTION=sqlite
 ENV DB_DATABASE=/var/www/html/database/database.sqlite
 
-RUN touch database/database.sqlite && \
-    php artisan storage:link && \
+RUN rm -f bootstrap/cache/*.php && \
+    touch database/database.sqlite && \
     chown -R www-data:www-data storage bootstrap/cache database && \
     chmod -R 775 storage bootstrap/cache database
 
