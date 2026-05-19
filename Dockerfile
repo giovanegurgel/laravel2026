@@ -1,21 +1,32 @@
 # ─── Stage 1: Build Laravel app + frontend assets ──────────────────────────
-FROM composer:2.7 AS builder
+FROM php:8.4-cli-alpine AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache nodejs npm
+RUN apk add --no-cache \
+        git \
+        curl \
+        unzip \
+        nodejs-current \
+        npm
+
+COPY --from=composer:2.7 /usr/bin/composer /usr/bin/composer
 
 RUN composer create-project laravel/laravel . --prefer-dist --no-interaction
 
 RUN composer install \
     --no-dev \
     --no-interaction \
+    --no-scripts \
     --prefer-dist \
     --optimize-autoloader
 
 RUN npm install && npm run build
 
-# ─── Stage 2: Production image (PHP-FPM + Nginx via Supervisord) ───────────
+RUN rm -f bootstrap/cache/*.php && \
+    rm -rf node_modules
+
+# ─── Stage 2: Production image ─────────────────────────────────────────────
 FROM php:8.4-fpm-alpine
 
 RUN apk add --no-cache \
