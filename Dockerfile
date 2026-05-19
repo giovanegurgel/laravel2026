@@ -1,46 +1,80 @@
-# Use the official PHP 8.3 Apache image
-FROM php:8.3-apache
+# ─── Stage 1: Install Laravel via Composer ─────────────────────────────────
+FROM composer:2.7 AS builder
 
-# Install required system dependencies for Laravel
-RUN apt-get update && apt-get install -y \
-    libpng-dev \
-    libonig-dev \
-    libxml2-dev \
-    zip \
-    unzip \
-    git \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
-# Install necessary PHP extensions (add others if needed)
-RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
+# Create a fresh Laravel project
+RUN composer create-project laravel/laravel . --prefer-dist --no-interaction
 
-# Enable Apache mod_rewrite for Laravel routing
-RUN a2enmod rewrite
+# Remove dev dependencies, optimise autoloader
+RUN composer install \
+    --no-dev \
+    --no-interaction \
+    --no-scripts \
+    --prefer-dist \
+    --optimize-autoloader
 
-# Install Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# ─── Stage 2: Build frontend assets (Vite) ─────────────────────────────────
+FROM node:20-alpine AS frontend
 
-# Set the working directory
+WORKDIR /app
+
+COPY --from=builder /app/package.json /app/package-lock.json /app/vite.config.js ./
+COPY --from=builder /app/resources ./resources
+
+RUN npm ci && npm run build
+
+# ─── Stage 3: Production image (PHP-FPM + Nginx via Supervisord) ────────────
+FROM php:8.3-fpm-alpine
+
+# System packages & PHP extensions
+RUN apk add --no-cache \
+        nginx \
+        supervisor \
+        curl \
+        libpng-dev \
+        libzip-dev \
+        oniguruma-dev \
+        icu-dev \
+    && docker-php-ext-install \
+        pdo_mysql \
+        mbstring \
+        zip \
+        gd \
+        intl \
+        opcache
+
+# ── Nginx config ────────────────────────────────────────────────────────────
+RUN mkdir -p /etc/nginx/http.d
+COPY docker/nginx/default.conf /etc/nginx/http.d/default.conf
+
+# ── PHP tuning ───────────────────────────────────────────────────────────────
+COPY docker/php/php.ini /usr/local/etc/php/conf.d/custom.ini
+
+# ── Supervisord config ───────────────────────────────────────────────────────
+COPY docker/supervisord.conf /etc/supervisord.conf
+
+# ── Laravel app ─────────────────────────────────────────────────────────────
 WORKDIR /var/www/html
 
-# Copy the application files into the container
-COPY . .
+# Copy the full Laravel install from Stage 1
+COPY --chown=www-data:www-data --from=builder /app .
 
-# Install Composer dependencies (optimizing for production)
-RUN composer install --optimize-autoloader --no-dev
+# Overlay the compiled Vite assets from Stage 2
+COPY --chown=www-data:www-data --from=frontend /app/public/build ./public/build
 
-# Set permissions for Laravel's storage and bootstrap cache
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+# Generate an APP_KEY and run Laravel bootstrap caches
+# APP_KEY can be overridden at runtime via environment variable
+RUN php artisan key:generate && \
+    php artisan storage:link && \
+    php artisan config:cache && \
+    php artisan route:cache && \
+    php artisan view:cache
 
-# ==========================================
-# CLOUD RUN SPECIFIC CONFIGURATION
-# ==========================================
+# Fix storage permissions
+RUN chown -R www-data:www-data storage bootstrap/cache && \
+    chmod -R 775 storage bootstrap/cache
 
-# 1. Change Apache Document Root to Laravel's /public folder
-ENV APACHE_DOCUMENT_ROOT /var/www/html/public
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
-RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
+EXPOSE 80
 
-# 2. Configure Apache to listen on the $PORT environment variable
-RUN sed -i 's/80/${PORT}/g' /etc/apache2/sites-available/000-default.conf /etc/apache2/ports.conf
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
