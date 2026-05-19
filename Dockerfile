@@ -21,7 +21,7 @@ RUN composer install \
 RUN npm install && npm run build
 
 # ─── Stage 2: Production image (PHP-FPM + Nginx via Supervisord) ───────────
-FROM php:8.3-fpm-alpine
+FROM php:8.4-fpm-alpine
 
 RUN apk add --no-cache \
         nginx \
