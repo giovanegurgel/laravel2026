@@ -3,10 +3,8 @@ FROM composer:2.7 AS builder
 
 WORKDIR /app
 
-# Create a fresh Laravel project
 RUN composer create-project laravel/laravel . --prefer-dist --no-interaction
 
-# Remove dev dependencies, optimise autoloader
 RUN composer install \
     --no-dev \
     --no-interaction \
@@ -36,44 +34,37 @@ RUN apk add --no-cache \
         libzip-dev \
         oniguruma-dev \
         icu-dev \
+        sqlite \
     && docker-php-ext-install \
-        pdo_mysql \
+        pdo_sqlite \
         mbstring \
         zip \
         gd \
         intl \
         opcache
 
-# ── Nginx config ────────────────────────────────────────────────────────────
-RUN mkdir -p /etc/nginx/http.d
 COPY docker/nginx/default.conf /etc/nginx/http.d/default.conf
-
-# ── PHP tuning ───────────────────────────────────────────────────────────────
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/custom.ini
-
-# ── Supervisord config ───────────────────────────────────────────────────────
 COPY docker/supervisord.conf /etc/supervisord.conf
 
-# ── Laravel app ─────────────────────────────────────────────────────────────
 WORKDIR /var/www/html
 
-# Copy the full Laravel install from Stage 1
 COPY --chown=www-data:www-data --from=builder /app .
-
-# Overlay the compiled Vite assets from Stage 2
 COPY --chown=www-data:www-data --from=frontend /app/public/build ./public/build
 
-# Generate an APP_KEY and run Laravel bootstrap caches
-# APP_KEY can be overridden at runtime via environment variable
-RUN php artisan key:generate && \
+ENV DB_CONNECTION=sqlite
+ENV DB_DATABASE=/var/www/html/database/database.sqlite
+
+RUN touch database/database.sqlite && \
+    php artisan key:generate && \
+    php artisan migrate --force && \
     php artisan storage:link && \
     php artisan config:cache && \
     php artisan route:cache && \
     php artisan view:cache
 
-# Fix storage permissions
-RUN chown -R www-data:www-data storage bootstrap/cache && \
-    chmod -R 775 storage bootstrap/cache
+RUN chown -R www-data:www-data storage bootstrap/cache database && \
+    chmod -R 775 storage bootstrap/cache database
 
 EXPOSE 80
 
